@@ -1,0 +1,102 @@
+local modem = peripheral.find("modem") or error("Modem introuvable !")
+modem.open(20)
+modem.open(10)
+
+local CAPTEUR = "front"
+local ZONE = "@a[distance=..20]"
+local tempsFinal = ""
+_G.nomSauvegarde = ""
+_G.attente = false
+
+local function getNomJoueur()
+    local ok, result = commands.exec("execute as @p[distance=..5] run list")
+    if ok and result then
+        for _, ligne in ipairs(result) do
+            local joueurs = ligne:match(": (.+)$")
+            if joueurs then
+                local premier = joueurs:match("^([^,]+)")
+                if premier then
+                    local nom = premier:match("^%s*(.-)%s*$")
+                    if nom and nom ~= "" then
+                        return nom
+                    end
+                end
+            end
+        end
+    end
+    return "Inconnu"
+end
+
+local function afficherTitreArrivee(nom, temps)
+    commands.exec('title ' .. ZONE .. ' times 0 60 20')
+    commands.exec('title ' .. ZONE .. ' subtitle {"text":"Temps : ' .. temps .. ' s","color":"yellow","bold":true}')
+    commands.exec('title ' .. ZONE .. ' title {"text":"' .. nom .. ' est arrive !","color":"white","bold":true}')
+end
+
+local function effacer()
+    commands.exec('title ' .. ZONE .. ' clear')
+end
+
+local function resetEcran()
+    term.clear()
+    term.setCursorPos(1, 1)
+    print("=== ARRIVEE ===")
+    print("En attente du kart...")
+end
+
+local function threadBouton()
+    while true do
+        if redstone.getInput(CAPTEUR) and not _G.attente then
+            _G.attente = true
+            local nom = getNomJoueur()
+            _G.nomSauvegarde = nom
+            print("Joueur detecte : [" .. _G.nomSauvegarde .. "]")
+            print("Signal STOP envoye !")
+            modem.transmit(20, 1, "STOP")
+            while redstone.getInput(CAPTEUR) do
+                sleep(0.05)
+            end
+        end
+        sleep(0.05)
+    end
+end
+
+local function threadModem()
+    while true do
+        local _, side, canal, _, msg = os.pullEvent("modem_message")
+        print("Recu canal: " .. tostring(canal) .. " msg: " .. tostring(msg))
+        print("nom global: [" .. tostring(_G.nomSauvegarde) .. "]")
+
+        if type(msg) == "string" then
+            if canal == 10 and msg:sub(1, 6) == "TEMPS:" then
+                tempsFinal = msg:sub(7)
+                _G.attente = false
+                local nom = _G.nomSauvegarde
+
+                print("=== ENVOI SCORE ===")
+                print("Nom : [" .. nom .. "]")
+                print("Temps : [" .. tempsFinal .. "]")
+
+                afficherTitreArrivee(nom, tempsFinal)
+
+                local msg_score = "SCORE:" .. nom .. ":" .. tempsFinal
+                print("Envoi : " .. msg_score)
+                modem.transmit(10, 1, msg_score)
+                print("Score envoye !")
+
+                sleep(5)
+                effacer()
+                _G.nomSauvegarde = ""
+                resetEcran()
+
+            elseif canal == 10 and msg == "RESET" then
+                effacer()
+                _G.nomSauvegarde = ""
+                os.reboot()
+            end
+        end
+    end
+end
+
+resetEcran()
+parallel.waitForAny(threadBouton, threadModem)
