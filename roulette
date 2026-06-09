@@ -1,7 +1,7 @@
 -- ============================================================
---  CGCasino - Roulette v2.2 | roulette.lua
---  FIX VISUEL : La roue s'arrête sur la bonne couleur !
---  Connexion MDP | Sons | Title Command Computer
+--  CGCasino - Roulette v2.3 | roulette.lua
+--  FIX VISUEL : Synchro parfaite entre calcul et affichage
+--  Fix Persistance : Le résultat reste affiché après le tour
 -- ============================================================
 
 -- ── CONFIGURATION ────────────────────────────────────────────
@@ -25,11 +25,14 @@ local speaker = peripheral.find("speaker")
 
 local SESSION = { logged_in = false, name = "", balance = 0 }
 local HISTORY = {} 
+local LAST_OFFSET = 0  -- Mémorise la position de la roue
+local LAST_RESULT_TEXT = nil
 local W, H = term.getSize()
--- Définition précise de la roue (37 cases)
+
+-- Table de la roue (37 cases standard)
 local WHEEL = {"V","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N"}
 
--- ── FONCTIONS SON & TITLE ────────────────────────────────────
+-- ── FONCTIONS SON & COMMANDES ────────────────────────────────
 local function playSnd(sound)
     if speaker then
         if sound == "click" then speaker.playSound("block.note_block.hat", 1, 1)
@@ -65,22 +68,21 @@ end
 local function draw_wheel(offset, result_type)
     local ry = 6
     local visible = 15 -- On affiche 15 cases
-    local start_x = math.floor((W - visible * 2) / 2) + 1
+    local start_x = math.floor((W - (visible * 2)) / 2) + 1
     
-    -- Effacer zone roulette
+    -- Nettoyage zone
     for i=0, 4 do at(1, ry+i, string.rep(" ", W), nil, colors.black) end
 
+    -- Dessin des cases
     for i = 1, visible do
-        -- Calcul de l'index dans la table WHEEL
         local idx = ((offset + i - 1) % #WHEEL) + 1
         local c = WHEEL[idx]
         local bg = (c == "R" and colors.red or (c == "N" and colors.gray or colors.green))
-        
         at(start_x + (i-1)*2, ry+1, "  ", colors.white, bg)
         at(start_x + (i-1)*2, ry+2, "  ", colors.white, bg)
     end
     
-    -- Marqueur (pointe sur la 8ème case des 15 visibles)
+    -- Le curseur pointe sur la 8ème case (le milieu exact de 15)
     center(ry, "vv", colors.yellow, colors.black)
     center(ry+3, "^^", colors.yellow, colors.black)
 
@@ -91,24 +93,24 @@ local function draw_wheel(offset, result_type)
     end
 end
 
--- Trouve l'offset nécessaire pour que la couleur soit sous le curseur
+-- Calcule l'offset pour que la couleur voulue soit à l'index 8 (centre)
 local function get_target_offset(target_color)
-    local possible_indices = {}
-    for i, color in ipairs(WHEEL) do
-        if color == target_color then table.insert(possible_indices, i) end
+    local indices = {}
+    for i, c in ipairs(WHEEL) do
+        if c == target_color then table.insert(indices, i) end
     end
-    -- Choisir un index au hasard parmi les bons
-    local target_idx = possible_indices[math.random(#possible_indices)]
-    -- Le curseur est sur la 8ème case affichée, donc on décale de 8
+    local target_idx = indices[math.random(#indices)]
+    -- MATH: (target_idx = ((offset + 8 - 1) % 37) + 1)  =>  offset = (target_idx - 8)
     return (target_idx - 8) % #WHEEL
 end
 
--- ── INTERFACE ────────────────────────────────────────────────
+-- ── INTERFACE GLOBALE ────────────────────────────────────────
 local function draw_ui(msg, msg_col)
     term.setBackgroundColor(colors.black); term.clear()
     at(1, 1, string.rep(" ", W), colors.black, colors.orange)
     center(1, " CGCasino - Roulette ", colors.black, colors.orange)
     
+    -- Historique
     at(2, 3, "Historique: ", colors.lightGray, colors.black)
     for i, res in ipairs(HISTORY) do
         if i > 12 then break end
@@ -116,12 +118,14 @@ local function draw_ui(msg, msg_col)
         at(14 + (i-1)*2, 3, " ", nil, col)
     end
 
-    draw_wheel(0)
+    -- On dessine la roue à sa dernière position connue
+    draw_wheel(LAST_OFFSET, LAST_RESULT_TEXT)
 
     if SESSION.logged_in then
         at(2, 12, "Compte: " .. SESSION.name, colors.cyan, colors.black)
         at(W-18, 12, string.format("Solde: %.2f", SESSION.balance), colors.lime, colors.black)
         
+        -- Boutons de mise
         local bw = math.floor(W/3)
         at(1, 14, string.rep(" ", bw), colors.white, colors.red)
         at(math.floor(bw/2)-2, 14, "ROUGE", colors.white, colors.red)
@@ -145,7 +149,7 @@ local function login_flow()
     local lx, ly = 5, 8
     for i=0, 8 do at(lx, ly+i, string.rep(" ", W-10)) end
     at(lx+2, ly+1, "CONNEXION CGBANK", colors.orange, colors.gray)
-    at(lx+2, ly+3, "Nom :", colors.white, colors.gray)
+    at(lx+2, ly+3, "Compte :", colors.white, colors.gray)
     term.setCursorPos(lx+3, ly+4); term.setBackgroundColor(colors.lightGray)
     term.write(string.rep(" ", W-14)); term.setCursorPos(lx+3, ly+4)
     local name = read()
@@ -168,9 +172,9 @@ end
 
 -- ── LOGIQUE JEU ──────────────────────────────────────────────
 local function play(choice)
-    local cName = (choice == "R" and "ROUGE" or (choice == "N" and "NOIR" or "VERT"))
+    LAST_RESULT_TEXT = "spin"
     playSnd("click")
-    draw_ui("MISE SUR : " .. cName, (choice == "R" and colors.red or (choice == "N" and colors.gray or colors.green)))
+    draw_ui("Mise sur " .. (choice=="R" and "ROUGE" or choice=="N" and "NOIR" or "VERT"))
     at(2, 17, "Montant : ", colors.white, colors.black); local bet = tonumber(read())
 
     if not bet or bet < CFG.bet_min or bet > CFG.bet_max or bet > SESSION.balance then
@@ -181,22 +185,23 @@ local function play(choice)
     if not ok then draw_ui("Erreur: "..msg, colors.red); return end
     SESSION.balance = new_bal
 
-    -- 1. Calcul du résultat logique
+    -- 1. Calcul logique
     local r = math.random(100)
     local res = (r <= 47 and "R" or (r <= 94 and "N" or "V"))
+    
+    -- 2. Calcul visuel
+    LAST_OFFSET = get_target_offset(res)
+    LAST_RESULT_TEXT = res
 
-    -- 2. Calcul de l'arrêt visuel
-    local final_offset = get_target_offset(res)
-
-    -- 3. Animation
-    for i = 1, 25 do
+    -- 3. Animation de rotation
+    for i = 1, 20 do
         playSnd("spin")
         draw_wheel(math.random(#WHEEL), "spin")
         os.sleep(0.05 + (i/150))
     end
     
-    -- 4. Arrêt précis
-    draw_wheel(final_offset, res)
+    -- 4. Affichage du résultat final
+    draw_wheel(LAST_OFFSET, LAST_RESULT_TEXT)
     table.insert(HISTORY, 1, res)
 
     if res == choice then
@@ -209,10 +214,10 @@ local function play(choice)
     else
         playSnd("lose"); draw_ui("PERDU...", colors.red)
     end
-    os.sleep(2)
+    os.sleep(2.5) -- Temps pour admirer le résultat
 end
 
--- ── MAIN ─────────────────────────────────────────────────────
+-- ── BOUCLE PRINCIPALE ────────────────────────────────────────
 if modem then modem.open(CFG.my_ch) modem.open(CFG.broadcast_ch) end
 math.randomseed(os.time())
 
@@ -222,15 +227,20 @@ while true do
         if ok then SESSION.balance = bal end
     end
     draw_ui()
+    
     local ev, p1, p2, p3, p4 = os.pullEvent()
     if ev == "mouse_click" then
         local x, y = p2, p3
         if x >= W-11 and y == 19 then break
-        elseif SESSION.logged_in and x >= 2 and x <= 16 and y == 19 then SESSION.logged_in = false; SESSION.name = ""; playSnd("click")
-        elseif not SESSION.logged_in and y >= 13 and y <= 15 then login_flow()
+        elseif SESSION.logged_in and x >= 2 and x <= 16 and y == 19 then 
+            SESSION.logged_in = false; SESSION.name = ""; playSnd("click")
+        elseif not SESSION.logged_in and y >= 13 and y <= 15 then 
+            login_flow()
         elseif SESSION.logged_in and y == 14 then
             local bw = math.floor(W/3)
-            if x <= bw then play("R") elseif x <= bw * 2 then play("N") else play("V") end
+            if x <= bw then play("R") 
+            elseif x <= bw * 2 then play("N") 
+            else play("V") end
         end
     elseif ev == "modem_message" and p2 == CFG.broadcast_ch and type(p4) == "table" and p4.type == "BIGWIN" then
         send_mc_title(p4.user, p4.amount); playSnd("bigwin")
