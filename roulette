@@ -1,7 +1,7 @@
 -- ============================================================
---  CGCasino - Roulette v1.7 | roulette.lua
---  MODE: Command Block PC (Vrai /title Minecraft)
---  Sons | Big Win Broadcast | Tactile Fix
+--  CGCasino - Roulette v1.8 | roulette.lua
+--  FIX TOTAL : Erreur 205 (Vararg) supprimée
+--  Sons | Big Win Title Minecraft | Tactile Garanti
 -- ============================================================
 
 -- ── CONFIGURATION ────────────────────────────────────────────
@@ -14,7 +14,7 @@ local CFG = {
     prob_rouge = 47, prob_noir = 47, prob_vert = 6,
     mult_rouge = 2,  mult_noir = 2,  mult_vert = 10,
     bet_min = 0.1,   bet_max = 100,
-    big_win_threshold = 5, -- Seuil pour le /title
+    big_win_threshold = 5, -- Seuil pour déclencher le /title
 }
 
 -- ── INITIALISATION ───────────────────────────────────────────
@@ -28,16 +28,7 @@ local HISTORY = {}
 local W, H = term.getSize()
 local WHEEL = {"V","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N"}
 
--- ── FONCTION TITLE (Minecraft Command) ──────────────────────
-local function send_minecraft_title(player, gain)
-    -- Si c'est un Command Computer, on utilise les commandes MC
-    if commands then
-        commands.exec(string.format('title @a subtitle {"text":"a gagne %s CGC au Casino !", "color":"yellow"}', tostring(gain)))
-        commands.exec(string.format('title @a title {"text":"BIG WIN: %s", "color":"gold", "bold":true}', player:upper()))
-    end
-end
-
--- ── SONS ─────────────────────────────────────────────────────
+-- ── FONCTIONS SON & TITLE ────────────────────────────────────
 local function playSnd(sound)
     if speaker then
         if sound == "click" then speaker.playSound("block.note_block.hat", 1, 1)
@@ -46,6 +37,13 @@ local function playSnd(sound)
         elseif sound == "bigwin" then speaker.playSound("ui.toast.challenge_complete", 1, 1)
         elseif sound == "lose" then speaker.playSound("entity.villager.no", 1, 1)
         end
+    end
+end
+
+local function send_mc_title(player, gain)
+    if commands then
+        commands.exec(string.format('title @a subtitle {"text":"a gagne %s CGC !", "color":"yellow"}', tostring(gain)))
+        commands.exec(string.format('title @a title {"text":"BIG WIN: %s", "color":"gold", "bold":true}', player:upper()))
     end
 end
 
@@ -62,7 +60,7 @@ local function center(y, text, fg, bg)
     at(x, y, text, fg, bg)
 end
 
--- ── ROULETTE & UI ────────────────────────────────────────────
+-- ── ROULETTE ─────────────────────────────────────────────────
 local function draw_wheel(offset, result_type)
     local ry = 6
     local visible = 15
@@ -109,39 +107,35 @@ local function draw_ui(msg, msg_col)
         at(1, 14, string.rep(" ", bw), colors.white, colors.red)
         center(14, "ROUGE", colors.white, colors.red)
         at(bw+1, 14, string.rep(" ", bw), colors.white, colors.gray)
-        at(bw+math.floor(bw/2)-2, 14, "NOIR", colors.white, colors.gray)
+        at(bw+math.floor(bw/2)-1, 14, "NOIR", colors.white, colors.gray)
         at(bw*2+1, 14, string.rep(" ", W-bw*2), colors.white, colors.green)
-        at(bw*2+math.floor(bw/2)-2, 14, "VERT", colors.white, colors.green)
+        at(bw*2+math.floor(bw/2)-1, 14, "VERT", colors.white, colors.green)
 
         at(2, 19, "[ DECONNEXION ]", colors.black, colors.lightGray)
     else
-        center(14, ">> CLIQUEZ POUR VOUS CONNECTER <<", colors.yellow, colors.black)
+        center(14, ">> CLIQUEZ ICI POUR VOUS CONNECTER <<", colors.yellow, colors.black)
     end
     at(W-11, 19, "[ QUITTER ]", colors.black, colors.red)
     if msg then center(16, msg, msg_col or colors.white, colors.black) end
 end
 
--- ── LOGIQUE DE JEU ────────────────────────────────────────────
+-- ── LOGIQUE JEU ──────────────────────────────────────────────
 local function play(choice)
     local cName = (choice == "R" and "ROUGE" or (choice == "N" and "NOIR" or "VERT"))
     local cCol  = (choice == "R" and colors.red or (choice == "N" and colors.gray or colors.green))
     
     playSnd("click")
-    draw_ui("SELECTION: " .. cName, cCol)
-    
-    at(2, 17, "Montant mise: ", colors.white, colors.black)
+    draw_ui("SELECTION : " .. cName, cCol)
+    at(2, 17, "Montant mise : ", colors.white, colors.black)
     local input = read()
     local bet = tonumber(input)
 
     if not bet or bet < CFG.bet_min or bet > CFG.bet_max or bet > SESSION.balance then
-        playSnd("lose")
-        draw_ui("Mise invalide !", colors.red)
-        os.sleep(1.5)
-        return
+        playSnd("lose"); draw_ui("Mise invalide !", colors.red); os.sleep(1); return
     end
 
     local ok, msg, new_bal = bank.withdraw(SESSION.name, bet, "Mise Roulette")
-    if not ok then draw_ui("Erreur: "..msg, colors.red) os.sleep(2) return end
+    if not ok then draw_ui("Erreur: "..msg, colors.red); return end
     SESSION.balance = new_bal
 
     local r = math.random(100)
@@ -160,57 +154,53 @@ local function play(choice)
         local mult = (choice == "V" and 10 or 2)
         local gain = bet * mult
         bank.deposit(SESSION.name, gain, "Gain Roulette")
-        playSnd("win")
-        draw_ui("GAGNE ! +" .. gain .. " CGC", colors.lime)
-        
+        playSnd("win"); draw_ui("GAGNE ! +" .. gain .. " CGC", colors.lime)
         if gain >= CFG.big_win_threshold then
             modem.transmit(CFG.broadcast_ch, CFG.my_ch, {type="BIGWIN", user=SESSION.name, amount=gain})
         end
     else
-        playSnd("lose")
-        draw_ui("PERDU...", colors.red)
+        playSnd("lose"); draw_ui("PERDU...", colors.red)
     end
-    os.sleep(2.5)
+    os.sleep(2)
 end
 
 -- ── BOUCLE PRINCIPALE ────────────────────────────────────────
-local function main()
-    if modem then modem.open(CFG.broadcast_ch) end
-    setup_palette()
-    math.randomseed(os.time())
+if modem then modem.open(CFG.broadcast_ch) end
+math.randomseed(os.time())
 
-    while true do
-        draw_ui()
-        local event, p1, p2, p3, p4 = os.pullEvent()
-        
-        if event == "mouse_click" then
-            local x, y = p2, p3
-            if x >= W-11 and y == 19 then return 
-            elseif SESSION.logged_in and x >= 2 and x <= 16 and y == 19 then
-                SESSION.logged_in = false; playSnd("click")
-            elseif not SESSION.logged_in and y >= 13 and y <= 15 then
-                center(17, "Nom de compte: ", colors.white, colors.black)
-                local u = read()
-                local ok, bal = bank.balance(u)
-                if ok then 
-                    SESSION.name, SESSION.balance, SESSION.logged_in = u, bal, true
-                    playSnd("win")
-                end
-            elseif SESSION.logged_in and y == 14 then
-                local bw = math.floor(W/3)
-                if x <= bw then play("R")
-                elseif x > bw and x <= bw*2 then play("N")
-                elseif x > bw*2 then play("V") end
-            end
+while true do
+    if SESSION.logged_in then
+        local ok, bal = bank.balance(SESSION.name)
+        if ok then SESSION.balance = bal end
+    end
+    draw_ui()
 
-        elseif event == "modem_message" then
-            local channel, message = p2, p4
-            if channel == CFG.broadcast_ch and type(message) == "table" and message.type == "BIGWIN" then
-                send_minecraft_title(message.user, message.amount)
-                playSnd("bigwin")
-            end
+    -- On récupère les paramètres de l'event sans utiliser les "..."
+    local event, p1, p2, p3, p4 = os.pullEvent()
+
+    if event == "mouse_click" then
+        local x, y = p2, p3
+        if x >= W-11 and y == 19 then break
+        elseif SESSION.logged_in and x >= 2 and x <= 16 and y == 19 then
+            SESSION.logged_in = false; playSnd("click")
+        elseif not SESSION.logged_in and y >= 13 and y <= 15 then
+            center(17, "Nom de compte: ", colors.white, colors.black)
+            local u = read()
+            local ok, bal = bank.balance(u)
+            if ok then SESSION.name, SESSION.balance, SESSION.logged_in = u, bal, true; playSnd("win") end
+        elseif SESSION.logged_in and y == 14 then
+            local bw = math.floor(W/3)
+            if x <= bw then play("R")
+            elseif x <= bw * 2 then play("N")
+            else play("V") end
+        end
+    elseif event == "modem_message" then
+        local channel, message = p2, p4
+        if channel == CFG.broadcast_ch and type(message) == "table" and message.type == "BIGWIN" then
+            send_mc_title(message.user, message.amount)
+            playSnd("bigwin")
         end
     end
 end
 
-main()
+term.setBackgroundColor(colors.black); term.clear(); term.setCursorPos(1,1)
