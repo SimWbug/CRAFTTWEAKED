@@ -386,7 +386,7 @@ local function main_menu()
         elseif c == "5" then screen_ping()
         elseif c:lower() == "q" then
             cls()
-            center(H//2, "CGBank Admin ferme.", CFG.COL.dim)
+            center(math.floor(H/2), "CGBank Admin ferme.", CFG.COL.dim)
             os.sleep(1)
             return
         end
