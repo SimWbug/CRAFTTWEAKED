@@ -29,9 +29,9 @@ local CFG = {
     }
 }
 
--- ╔══════════════════════════════════════════╗
--- ║  HASH mot de passe (djb2, pure Lua)      ║
--- ╚══════════════════════════════════════════╝
+-- ============================================
+--      HASH mot de passe (djb2, pure Lua)     
+-- ============================================
 -- CC:Tweaked n'a pas de lib crypto native.
 -- djb2 est simple, suffisant pour un usage MC.
 -- Le mot de passe n'est JAMAIS stocke en clair.
@@ -40,14 +40,14 @@ local function hash(str)
     for i = 1, #str do
         -- djb2: h = h * 33 XOR byte
         -- On garde en 32 bits unsigned via modulo
-        h = ((h * 33) % 0x100000000) ~ str:byte(i)
+        h = bit32.bxor((h * 33) % 0x100000000, str:byte(i))
     end
     return string.format("%08x", h)
 end
 
--- ╔══════════════════════════════════════════╗
--- ║         BASE DE DONNEES                  ║
--- ╚══════════════════════════════════════════╝
+-- ============================================
+--               BASE DE DONNEES               
+-- ============================================
 local DB = {
     accounts  = {},
     next_txid = 1,
@@ -79,18 +79,18 @@ local function db_load()
     end
 end
 
--- ╔══════════════════════════════════════════╗
--- ║         JOURNAL                          ║
--- ╚══════════════════════════════════════════╝
+-- ============================================
+--                   JOURNAL                   
+-- ============================================
 local function log(msg)
     local f = fs.open(CFG.log_file, "a")
     f.writeLine("[" .. os.date("%Y-%m-%d %H:%M:%S") .. "] " .. msg)
     f.close()
 end
 
--- ╔══════════════════════════════════════════╗
--- ║         AUTH                             ║
--- ╚══════════════════════════════════════════╝
+-- ============================================
+--                     AUTH                    
+-- ============================================
 local function account_exists(name)
     return DB.accounts[name] ~= nil
 end
@@ -105,9 +105,9 @@ local function check_password(name, password)
     return true, "OK"
 end
 
--- ╔══════════════════════════════════════════╗
--- ║         LOGIQUE METIER                   ║
--- ╚══════════════════════════════════════════╝
+-- ============================================
+--                LOGIQUE METIER               
+-- ============================================
 local function round(n)
     return math.floor(n * 10000 + 0.5) / 10000
 end
@@ -214,9 +214,9 @@ local function admin_delete_account(name, admin)
     return true, "OK"
 end
 
--- ╔══════════════════════════════════════════╗
--- ║         SERVEUR RESEAU                   ║
--- ╚══════════════════════════════════════════╝
+-- ============================================
+--                SERVEUR RESEAU               
+-- ============================================
 local modem = peripheral.wrap(CFG.modem_side)
 if not modem then error("Aucun modem sur: " .. CFG.modem_side) end
 modem.open(CFG.channel)
@@ -224,9 +224,9 @@ modem.open(CFG.channel)
 term.setBackgroundColor(CFG.COL.bg)
 term.setTextColor(CFG.COL.accent)
 term.clear(); term.setCursorPos(1,1)
-print("╔══════════════════════════════╗")
-print("║   CGBank Server  v1.1        ║")
-print("╚══════════════════════════════╝")
+print("============================================")
+print("   CGBank Server  v1.1")
+print("============================================")
 term.setTextColor(CFG.COL.dim)
 print("Canal: " .. CFG.channel .. "  |  DB: " .. CFG.db_file)
 
