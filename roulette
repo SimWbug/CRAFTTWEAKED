@@ -1,36 +1,42 @@
 -- ============================================================
---  CGCasino - Roulette v1.4 | roulette.lua
---  100% Stable | Tactile | Historique | Déconnexion
+--  CGCasino - Roulette v1.5 | roulette.lua
+--  Fix Clics | Sons | Big Win Broadcast | Historique
 -- ============================================================
 
 -- ── CONFIGURATION ────────────────────────────────────────────
 local CFG = {
-    modem_side = "top",
-    server_ch  = 1000,
-    my_ch      = 1010,
+    modem_side   = "top",
+    server_ch    = 1000,
+    my_ch        = 1010,
+    broadcast_ch = 1005, -- Canal pour les annonces Big Win
 
     prob_rouge = 47, prob_noir = 47, prob_vert = 6,
     mult_rouge = 2,  mult_noir = 2,  mult_vert = 10,
     bet_min = 0.1,   bet_max = 100,
+    big_win_threshold = 10, -- Seuil pour annoncer à tout le monde
 }
 
--- ── ETAT DU JEU ──────────────────────────────────────────────
+-- ── INITIALISATION ───────────────────────────────────────────
 os.loadAPI("cgbank_api")
 local bank = cgbank_api.new(CFG.modem_side, CFG.server_ch, CFG.my_ch)
+local modem = peripheral.wrap(CFG.modem_side)
+local speaker = peripheral.find("speaker")
 
 local SESSION = { logged_in = false, name = "", balance = 0 }
-local HISTORY = {} -- Stocke les derniers résultats
+local HISTORY = {} 
 local W, H = term.getSize()
+local WHEEL = {"V","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N"}
 
--- ── PALETTE ──────────────────────────────────────────────────
-local function setup_palette()
-    term.setPaletteColor(colors.red,       0xCC2200)
-    term.setPaletteColor(colors.black,     0x0A0A0A)
-    term.setPaletteColor(colors.green,     0x00AA33)
-    term.setPaletteColor(colors.yellow,    0xFFCC00)
-    term.setPaletteColor(colors.gray,      0x222222)
-    term.setPaletteColor(colors.lightGray, 0x555555)
-    term.setPaletteColor(colors.orange,    0xFF6600)
+-- ── SONS ─────────────────────────────────────────────────────
+local function playSnd(sound)
+    if speaker then
+        if sound == "click" then speaker.playSound("block.note_block.hat", 1, 1)
+        elseif sound == "spin" then speaker.playSound("block.note_block.bit", 0.5, 2)
+        elseif sound == "win" then speaker.playSound("entity.player.levelup", 1, 1)
+        elseif sound == "bigwin" then speaker.playSound("ui.toast.challenge_complete", 1, 1)
+        elseif sound == "lose" then speaker.playSound("entity.villager.no", 1, 1)
+        end
+    end
 end
 
 -- ── UTILITAIRES GRAPHIQUES ───────────────────────────────────
@@ -46,35 +52,23 @@ local function center(y, text, fg, bg)
     at(x, y, text, fg, bg)
 end
 
--- Séquence de la roue (V=Vert, R=Rouge, N=Noir)
-local WHEEL = {"V","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N"}
-
--- ── DESSIN DE LA ROUE ────────────────────────────────────────
+-- ── ROULETTE & UI ────────────────────────────────────────────
 local function draw_wheel(offset, result_type)
-    local ry = 6 -- Position Y de la roue
-    local visible = 15 -- Nombre de cases visibles
+    local ry = 6
+    local visible = 15
     local start_x = math.floor((W - visible * 2) / 2) + 1
+    for i=0, 4 do at(1, ry+i, string.rep(" ", W), nil, colors.black) end
 
-    -- Effacer la zone de la roue
-    for i=0, 4 do
-        at(1, ry+i, string.rep(" ", W), nil, colors.black)
-    end
-
-    -- Dessiner les cases
     for i = 1, visible do
         local idx = ((offset + i - 1) % #WHEEL) + 1
         local c = WHEEL[idx]
         local bg = (c == "R" and colors.red or (c == "N" and colors.gray or colors.green))
-        
         at(start_x + (i-1)*2, ry+1, "  ", colors.white, bg)
         at(start_x + (i-1)*2, ry+2, "  ", colors.white, bg)
     end
-
-    -- Marqueur central
     center(ry, "vv", colors.yellow, colors.black)
     center(ry+3, "^^", colors.yellow, colors.black)
 
-    -- Affichage du texte de résultat si présent
     if result_type and result_type ~= "spin" then
         local name = (result_type == "R" and "ROUGE" or (result_type == "N" and "NOIR" or "VERT"))
         local col  = (result_type == "R" and colors.red or (result_type == "N" and colors.gray or colors.green))
@@ -82,175 +76,148 @@ local function draw_wheel(offset, result_type)
     end
 end
 
--- ── INTERFACE PRINCIPALE ─────────────────────────────────────
 local function draw_ui(msg, msg_col)
     term.setBackgroundColor(colors.black)
     term.clear()
-
-    -- Barre de titre
     at(1, 1, string.rep(" ", W), colors.black, colors.orange)
     center(1, " CGCasino - Roulette ", colors.black, colors.orange)
-
-    -- Historique (Derniers tirages)
-    at(2, 3, "Derniers tirages: ", colors.lightGray, colors.black)
+    
+    -- Historique
+    at(2, 3, "Historique: ", colors.lightGray, colors.black)
     for i, res in ipairs(HISTORY) do
         if i > 12 then break end
         local col = (res == "R" and colors.red or (res == "N" and colors.gray or colors.green))
-        at(20 + (i-1)*2, 3, " ", nil, col)
+        at(14 + (i-1)*2, 3, " ", nil, col)
     end
 
     draw_wheel(0)
 
-    -- Infos Joueur / Connexion
     if SESSION.logged_in then
         at(2, 12, "Joueur: " .. SESSION.name, colors.cyan, colors.black)
         at(W-18, 12, string.format("Solde: %.2f", SESSION.balance), colors.lime, colors.black)
         
-        -- Boutons de mise (Zones cliquables)
+        -- Boutons de mise
         local bw = math.floor(W/3)
         at(1, 14, string.rep(" ", bw), colors.white, colors.red)
         center(14, "ROUGE x2", colors.white, colors.red)
-
         at(bw+1, 14, string.rep(" ", bw), colors.white, colors.gray)
-        at(bw+math.floor(bw/2)-3, 14, "NOIR x2", colors.white, colors.gray)
-
+        at(bw+4, 14, "NOIR x2", colors.white, colors.gray)
         at(bw*2+1, 14, string.rep(" ", W-bw*2), colors.white, colors.green)
-        at(bw*2+math.floor(bw/2)-3, 14, "VERT x10", colors.white, colors.green)
+        at(bw*2+4, 14, "VERT x10", colors.white, colors.green)
 
-        -- Footer (Déconnexion / Quitter)
         at(2, 19, "[ DECONNEXION ]", colors.black, colors.lightGray)
     else
         center(14, ">> CLIQUEZ ICI POUR VOUS CONNECTER <<", colors.yellow, colors.black)
     end
-
     at(W-11, 19, "[ QUITTER ]", colors.black, colors.red)
-
-    -- Message d'état (Gagné / Perdu)
     if msg then center(16, msg, msg_col or colors.white, colors.black) end
 end
 
--- ── LOGIQUE DE CONNEXION ─────────────────────────────────────
-local function screen_login()
-    term.setBackgroundColor(colors.gray)
-    local lx, ly = 10, 7
-    for i=0, 6 do at(lx, ly+i, string.rep(" ", W-20)) end
-    
-    at(lx+2, ly+1, "CONNEXION BANQUE", colors.orange, colors.gray)
-    at(lx+2, ly+3, "Compte: ", colors.white, colors.gray)
-    term.setCursorPos(lx+10, ly+3)
-    local user = read()
-    at(lx+2, ly+5, "MDP:    ", colors.white, colors.gray)
-    term.setCursorPos(lx+10, ly+5)
-    local pass = read("*")
-
-    -- Vérification simple via balance (pour compatibilité API)
-    local ok, bal = bank.balance(user)
-    if ok then
-        SESSION.logged_in = true
-        SESSION.name = user
-        SESSION.balance = bal
-        return true
+-- ── BIG WIN SYSTEM ───────────────────────────────────────────
+local function show_big_win(player, amount)
+    playSnd("bigwin")
+    local txt = " PLAYER " .. player:upper() .. " BIGWIN: " .. amount .. " CGC "
+    for i = 1, 4 do
+        at(1, 10, string.rep(" ", W), colors.white, colors.purple)
+        center(10, txt, colors.white, colors.purple)
+        os.sleep(0.3)
+        at(1, 10, string.rep(" ", W), colors.white, colors.blue)
+        center(10, txt, colors.white, colors.blue)
+        os.sleep(0.3)
     end
-    return false
 end
 
--- ── JOUER UN TOUR ────────────────────────────────────────────
+-- ── LOGIQUE DE JEU ────────────────────────────────────────────
 local function play(choice)
-    -- Demander la mise
-    draw_ui("Entrez votre mise dans le terminal...", colors.yellow)
-    term.setCursorPos(math.floor(W/2)-2, 17)
-    term.setTextColor(colors.white)
+    playSnd("click")
+    local cName = (choice == "R" and "ROUGE" or (choice == "N" and "NOIR" or "VERT"))
+    local cCol  = (choice == "R" and colors.red or (choice == "N" and colors.gray or colors.green))
+    
+    draw_ui("MISE SUR " .. cName, cCol)
+    at(2, 17, "Entrez montant: ", colors.white, colors.black)
     local input = read()
     local bet = tonumber(input)
 
     if not bet or bet < CFG.bet_min or bet > CFG.bet_max or bet > SESSION.balance then
+        playSnd("lose")
         draw_ui("Mise invalide !", colors.red)
-        os.sleep(1.5)
+        os.sleep(1)
         return
     end
 
-    -- Retrait
     local ok, msg, new_bal = bank.withdraw(SESSION.name, bet, "Mise Roulette")
-    if not ok then draw_ui("Erreur: "..msg, colors.red) os.sleep(2) return end
+    if not ok then draw_ui("Erreur: "..msg, colors.red) return end
     SESSION.balance = new_bal
 
-    -- Tirage Aléatoire
+    -- Tirage & Animation
     local r = math.random(100)
-    local res = "V"
-    if r <= CFG.prob_rouge then res = "R"
-    elseif r <= CFG.prob_rouge + CFG.prob_noir then res = "N" end
+    local res = (r <= 47 and "R" or (r <= 94 and "N" or "V"))
 
-    -- Animation de spin
     for i = 1, 20 do
+        playSnd("spin")
         draw_wheel(math.random(#WHEEL), "spin")
-        os.sleep(0.05)
+        os.sleep(0.05 + (i/100))
     end
     
     draw_wheel(0, res)
     table.insert(HISTORY, 1, res)
 
-    -- Résultat
     if res == choice then
-        local mult = (choice == "R" and CFG.mult_rouge or (choice == "N" and CFG.mult_noir or CFG.mult_vert))
-        local gain = bet * mult
+        local gain = bet * (choice == "V" and 10 or 2)
         bank.deposit(SESSION.name, gain, "Gain Roulette")
+        playSnd("win")
         draw_ui("GAGNE ! +" .. gain .. " CGC", colors.lime)
+        
+        if gain >= CFG.big_win_threshold then
+            modem.transmit(CFG.broadcast_ch, CFG.my_ch, {type="BIGWIN", user=SESSION.name, amount=gain})
+        end
     else
-        draw_ui("PERDU... -" .. bet .. " CGC", colors.red)
+        playSnd("lose")
+        draw_ui("PERDU...", colors.red)
     end
     os.sleep(2)
 end
 
--- ── BOUCLE PRINCIPALE ────────────────────────────────────────
-setup_palette()
-math.randomseed(os.time())
-
-while true do
-    -- Refresh balance auto
-    if SESSION.logged_in then
-        local _, b = bank.balance(SESSION.name)
-        SESSION.balance = b or SESSION.balance
-    end
-
-    draw_ui()
-    
-    local event, button, x, y = os.pullEvent("mouse_click")
-
-    -- 1. Bouton Quitter
-    if x >= W-11 and y == 19 then
-        break
-    end
-
-    -- 2. Bouton Déconnexion
-    if SESSION.logged_in and x >= 2 and x <= 16 and y == 19 then
-        SESSION.logged_in = false
-        SESSION.name = ""
-        SESSION.balance = 0
-    end
-
-    -- 3. Zone de Connexion (si déconnecté)
-    if not SESSION.logged_in and y >= 13 and y <= 15 then
-        if not screen_login() then
-            draw_ui("Echec de connexion !", colors.red)
-            os.sleep(2)
-        end
-    end
-
-    -- 4. Zones de Mise (si connecté)
-    if SESSION.logged_in and y == 14 then
-        if x <= math.floor(W/3) then
-            play("R") -- Rouge
-        elseif x <= math.floor(W/3)*2 then
-            play("N") -- Noir
-        else
-            play("V") -- Vert
+-- ── GESTION DES EVENEMENTS ────────────────────────────────────
+local function main_loop()
+    while true do
+        draw_ui()
+        local event, button, x, y = os.pullEvent()
+        
+        if event == "mouse_click" then
+            if x >= W-11 and y == 19 then return -- Quitter
+            elseif SESSION.logged_in and x >= 2 and x <= 16 and y == 19 then
+                SESSION.logged_in = false; playSnd("click")
+            elseif not SESSION.logged_in and y >= 13 and y <= 15 then
+                -- Login simple (simulation balance)
+                center(17, "Pseudo: ", colors.white, colors.black)
+                local u = read()
+                local ok, bal = bank.balance(u)
+                if ok then SESSION.name = u; SESSION.balance = bal; SESSION.logged_in = true; playSnd("win") end
+            elseif SESSION.logged_in and y == 14 then
+                -- FIX DETECTION CLIC :
+                local bw = math.floor(W/3)
+                if x <= bw then play("R")
+                elseif x > bw and x <= bw*2 then play("N")
+                elseif x > bw*2 then play("V") end
+            end
+        elseif event == "modem_message" then
+            local _, _, ch, _, data = ...
+            if ch == CFG.broadcast_ch and type(data) == "table" and data.type == "BIGWIN" then
+                show_big_win(data.user, data.amount)
+            end
         end
     end
 end
 
--- Restauration terminal
+-- ── EXECUTION ────────────────────────────────────────────────
+if modem then modem.open(CFG.broadcast_ch) end
+term.setPaletteColor(colors.purple, 0x8800FF)
+setup_palette()
+math.randomseed(os.time())
+
+parallel.waitForAny(main_loop)
+
 term.setBackgroundColor(colors.black)
-term.setTextColor(colors.white)
 term.clear()
 term.setCursorPos(1,1)
-print("Merci d'avoir joue au CGCasino !")
