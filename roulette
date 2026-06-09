@@ -1,6 +1,6 @@
 -- ============================================================
---  CGCasino - Roulette v1.2  |  roulette.lua
---  Image: roulette.nfp | Tactile | Historique | Deconnexion
+--  CGCasino - Roulette v1.3 | roulette.lua
+--  Tactile | Historique | Déconnexion | Sans NFP (Stable)
 -- ============================================================
 
 -- ── CONFIGURATION ────────────────────────────────────────────
@@ -8,7 +8,6 @@ local CFG = {
     modem_side = "top",
     server_ch  = 1000,
     my_ch      = 1010,
-    img_path   = "roulette.nfp", -- Ton fichier local
 
     prob_rouge = 47, prob_noir = 47, prob_vert = 6,
     mult_rouge = 2,  mult_noir = 2,  mult_vert = 10,
@@ -20,9 +19,8 @@ os.loadAPI("cgbank_api")
 local bank = cgbank_api.new(CFG.modem_side, CFG.server_ch, CFG.my_ch)
 
 local SESSION = { logged_in = false, name = "", balance = 0 }
-local HISTORY = {} -- Derniers tirages
+local HISTORY = {} -- Stocke les derniers resultats ("R", "N", "V")
 local W, H = term.getSize()
-local IMG_DATA = paintutils.loadImage(CFG.img_path)
 
 -- Palette Casino
 local function setup_palette()
@@ -35,7 +33,7 @@ local function setup_palette()
     term.setPaletteColor(colors.orange,    0xFF6600)
 end
 
--- ── FONCTIONS GRAPHIQUES ─────────────────────────────────────
+-- ── UTILITAIRES UI ───────────────────────────────────────────
 local function at(x, y, text, fg, bg)
     term.setCursorPos(x, y)
     if bg then term.setBackgroundColor(bg) end
@@ -48,41 +46,39 @@ local function center(y, text, fg, bg)
     at(x, y, text, fg, bg)
 end
 
-local WHEEL_COLORS = {"V","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N"}
+-- ── DESSIN DE LA ROULETTE (BLIT) ─────────────────────────────
+local WHEEL = {"V","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N","R","N"}
 
--- Dessine la roulette et l'image NFP
-local function draw_wheel(offset, result_text)
-    -- 1. Afficher l'image NFP en fond (ajustée à la ligne 4)
-    if IMG_DATA then
-        paintutils.drawImage(IMG_DATA, 1, 4)
-    else
-        at(1, 6, "IMAGE MANQUANTE", colors.red, colors.black)
-    end
-
-    -- 2. Dessiner les numéros qui défilent par dessus l'image
-    -- On adapte les coordonnées X/Y pour que ça tombe dans les cases de ton image
-    local visible_cases = 11
-    local start_x = math.floor((W - visible_cases * 3) / 2) + 1
+local function draw_wheel(offset, highlight)
+    local ry = 5
+    -- Fond de la zone roulette
+    for i=0, 4 do at(1, ry+i, string.rep(" ", W), nil, colors.black) end
     
-    for i = 1, visible_cases do
-        local idx = ((offset + i - 1) % #WHEEL_COLORS) + 1
-        local c_code = WHEEL_COLORS[idx]
-        local bg = (c_code == "R" and colors.red or (c_code == "N" and colors.gray or colors.green))
+    local visible = 13
+    local start_x = math.floor((W - visible * 3) / 2) + 1
+
+    for i = 1, visible do
+        local idx = ((offset + i - 1) % #WHEEL) + 1
+        local c = WHEEL[idx]
+        local bg = (c == "R" and colors.red or (c == "N" and colors.gray or colors.green))
         
-        at(start_x + (i-1)*3, 7, "   ", colors.white, bg)
-        at(start_x + (i-1)*3, 8, string.format(" %d", idx % 10), colors.white, bg)
+        at(start_x + (i-1)*3, ry+1, "   ", colors.white, bg)
+        at(start_x + (i-1)*3, ry+2, string.format(" %d", idx % 10), colors.white, bg)
+        at(start_x + (i-1)*3, ry+3, "   ", colors.white, bg)
     end
 
-    -- 3. Curseur de sélection (Flèche)
-    center(5, " vv ", colors.yellow, colors.black)
+    -- Curseur Central
+    center(ry, "vv", colors.yellow, colors.black)
+    center(ry+4, "^^", colors.yellow, colors.black)
 
-    -- 4. Résultat texte
-    if result_text then
-        center(10, " " .. result_text .. " ", colors.white, colors.orange)
+    if highlight and highlight ~= "spin" then
+        local txt = (highlight == "R" and " ROUGE " or (highlight == "N" and " NOIR " or " VERT "))
+        local col = (highlight == "R" and colors.red or (highlight == "N" and colors.gray or colors.green))
+        center(ry+2, txt, colors.white, col)
     end
 end
 
-local function draw_ui(msg, msg_col)
+local function draw_main_ui(msg, msg_col)
     term.setBackgroundColor(colors.black)
     term.clear()
 
@@ -90,144 +86,169 @@ local function draw_ui(msg, msg_col)
     at(1, 1, string.rep(" ", W), colors.black, colors.orange)
     center(1, " CGCasino - Roulette ", colors.black, colors.orange)
     
-    at(2, 2, "Historique: ", colors.lightGray, colors.black)
+    at(2, 3, "Derniers tirages: ", colors.lightGray, colors.black)
     for i, res in ipairs(HISTORY) do
-        if i > 12 then break end
+        if i > 10 then break end
         local col = (res == "R" and colors.red or (res == "N" and colors.gray or colors.green))
-        at(14 + (i-1)*2, 2, "  ", colors.white, col)
+        at(20 + (i-1)*2, 3, " ", nil, col)
     end
 
     draw_wheel(0)
 
     -- Infos Joueur
     if SESSION.logged_in then
-        at(2, 12, "Compte: " .. SESSION.name, colors.cyan, colors.black)
-        at(W-18, 12, string.format("Solde: %.2f", SESSION.balance), colors.lime, colors.black)
-    end
+        at(2, 11, "Compte: "..SESSION.name, colors.cyan, colors.black)
+        at(W-18, 11, string.format("Solde: %.2f CGC", SESSION.balance), colors.lime, colors.black)
+        
+        -- Boutons de mise
+        local bw = math.floor(W/3)
+        at(1, 13, string.rep(" ", bw), colors.white, colors.red)
+        center(13, "ROUGE x2", colors.white, colors.red)
+        at(bw+1, 13, string.rep(" ", bw), colors.white, colors.gray)
+        at(bw+math.floor(bw/2)-3, 13, "NOIR x2", colors.white, colors.gray)
+        at(bw*2+1, 13, string.rep(" ", W-bw*2), colors.white, colors.green)
+        at(bw*2+math.floor(bw/2)-3, 13, "VERT x10", colors.white, colors.green)
 
-    -- Boutons de mise (Zones cliquables)
-    local bw = math.floor(W/3)
-    at(1, 14, string.rep(" ", bw), colors.white, colors.red)
-    center(14, "ROUGE x"..CFG.mult_rouge, colors.white, colors.red)
-    at(bw+1, 14, string.rep(" ", bw), colors.white, colors.gray)
-    at(bw+5, 14, "NOIR x"..CFG.mult_noir, colors.white, colors.gray)
-    at(bw*2+1, 14, string.rep(" ", W-bw*2), colors.white, colors.green)
-    at(bw*2+5, 14, "VERT x"..CFG.mult_vert, colors.white, colors.green)
-
-    -- Message d'état
-    if msg then center(16, msg, msg_col or colors.white, colors.black) end
-
-    -- Footer Tactile
-    if SESSION.logged_in then
-        at(2, 19, "[ DECONNEXION ]", colors.black, colors.lightGray)
+        -- Bouton de deconnexion
+        at(2, 18, "[ DECONNEXION ]", colors.black, colors.lightGray)
     else
-        center(18, "[ CLIQUEZ ICI POUR VOUS CONNECTER ]", colors.yellow, colors.black)
+        center(14, "CLIQUEZ ICI POUR VOUS CONNECTER", colors.yellow, colors.black)
     end
-    at(W-11, 19, "[ QUITTER ]", colors.black, colors.red)
+
+    -- Bouton Quitter
+    at(W-11, 18, "[ QUITTER ]", colors.black, colors.red)
+
+    if msg then center(16, msg, msg_col or colors.white, colors.black) end
 end
 
--- ── LOGIQUE DE JEU ───────────────────────────────────────────
+-- ── LOGIQUE JEU ──────────────────────────────────────────────
 
-local function ask_bet()
-    at(1, 16, string.rep(" ", W), colors.black, colors.black)
-    center(16, "Combien misez-vous ?", colors.yellow, colors.black)
+local function play_round(choice)
+    -- Demander la mise
+    draw_main_ui("Entrez votre mise dans le chat...", colors.yellow)
     term.setCursorPos(math.floor(W/2)-2, 17)
-    term.setTextColor(colors.white)
     local input = read()
-    local amount = tonumber(input)
-    if amount and amount >= CFG.bet_min and amount <= CFG.bet_max and amount <= SESSION.balance then
-        return amount
+    local bet = tonumber(input)
+
+    if not bet or bet < CFG.bet_min or bet > CFG.bet_max or bet > SESSION.balance then
+        draw_main_ui("Mise invalide !", colors.red)
+        os.sleep(1.5)
+        return
     end
-    return nil
-end
 
-local function play(choice)
-    local bet = ask_bet()
-    if not bet then return end
-
-    -- Retrait banque
-    local ok, msg, new_bal = bank.withdraw(SESSION.name, bet, "Roulette")
-    if not ok then return end
+    -- Retrait Banque
+    local ok, msg, new_bal = bank.withdraw(SESSION.name, bet, "Mise Roulette")
+    if not ok then
+        draw_main_ui("Erreur: "..msg, colors.red)
+        os.sleep(2)
+        return
+    end
     SESSION.balance = new_bal
 
-    -- Animation
-    local final_res = "R"
+    -- Tirage
     local r = math.random(100)
-    if r <= CFG.prob_rouge then final_res = "R"
-    elseif r <= CFG.prob_rouge + CFG.prob_noir then final_res = "N"
-    else final_res = "V" end
+    local result = "V"
+    if r <= CFG.prob_rouge then result = "R"
+    elseif r <= CFG.prob_rouge + CFG.prob_noir then result = "N" end
 
-    for i = 1, 20 do
-        draw_wheel(math.random(#WHEEL_COLORS), "SPIN...")
+    -- Animation
+    for i = 1, 15 do
+        draw_wheel(math.random(#WHEEL), "spin")
         os.sleep(0.1)
     end
-    
-    draw_wheel(0, "RESULTAT: " .. (final_res == "R" and "ROUGE" or (final_res == "N" and "NOIR" or "VERT")))
-    table.insert(HISTORY, 1, final_res)
+    draw_wheel(0, result)
+    table.insert(HISTORY, 1, result)
 
-    -- Gain
-    if final_res == choice then
+    -- Resultat
+    if result == choice then
         local mult = (choice == "R" and CFG.mult_rouge or (choice == "N" and CFG.mult_noir or CFG.mult_vert))
-        local gain = bet * mult
-        bank.deposit(SESSION.name, gain, "Gain Roulette")
-        draw_ui("GAGNE ! +"..gain.." CGC", colors.lime)
+        bank.deposit(SESSION.name, bet * mult, "Gain Roulette")
+        draw_main_ui("GAGNE ! +"..(bet*mult).." CGC", colors.lime)
     else
-        draw_ui("PERDU...", colors.red)
+        draw_main_ui("PERDU...", colors.red)
     end
     os.sleep(2)
 end
 
--- ── BOUCLE PRINCIPALE ────────────────────────────────────────
-setup_palette()
+-- ── SYSTEME DE CONNEXION ─────────────────────────────────────
 
-while true do
-    -- Refresh balance
-    if SESSION.logged_in then
-        local _, b = bank.balance(SESSION.name)
-        SESSION.balance = b or SESSION.balance
-    end
-
-    draw_ui()
+local function login_screen()
+    term.setBackgroundColor(colors.gray)
+    local lx, ly = math.floor(W/4), 7
+    for i=0, 6 do at(lx, ly+i, string.rep(" ", math.floor(W/2))) end
     
-    local event, button, x, y = os.pullEvent("mouse_click")
+    at(lx+2, ly+1, "CONNEXION", colors.orange, colors.gray)
+    at(lx+2, ly+3, "Nom: ", colors.white, colors.gray)
+    term.setCursorPos(lx+7, ly+3)
+    local user = read()
+    at(lx+2, ly+5, "MDP: ", colors.white, colors.gray)
+    term.setCursorPos(lx+7, ly+5)
+    local pass = read("*")
 
-    -- Bouton Quitter
-    if x >= W-11 and y == 19 then
-        break
-    end
-
-    -- Bouton Deconnexion
-    if SESSION.logged_in and x <= 16 and y == 19 then
-        SESSION.logged_in = false
-        SESSION.name = ""
-    end
-
-    -- Connexion
-    if not SESSION.logged_in and y >= 17 and y <= 19 then
-        term.setBackgroundColor(colors.gray)
-        at(5, 8,  " Compte:         ", colors.white)
-        at(5, 9,  "                ", colors.white)
-        term.setCursorPos(14, 8)
-        local user = read()
-        at(5, 10, " Mot de passe:   ", colors.white)
-        at(5, 11, "                ", colors.white)
-        term.setCursorPos(19, 10)
-        local pass = read("*")
-        
-        -- Simulation login (remplacer par ton bank.login si existant)
-        SESSION.name = user
+    -- On utilise l'API Bank pour verifier (simulation ici, adapte si besoin)
+    -- Si ton API n'a pas de bank.login, on fait juste une verif de balance
+    local ok, bal = bank.balance(user)
+    if ok then
         SESSION.logged_in = true
-    end
-
-    -- Clic sur les couleurs (Mise)
-    if SESSION.logged_in and y == 14 then
-        if x <= math.floor(W/3) then play("R")
-        elseif x <= math.floor(W/3)*2 then play("N")
-        else play("V") end
+        SESSION.name = user
+        SESSION.balance = bal
+        return true
+    else
+        return false
     end
 end
 
-term.setTextColor(colors.white)
+-- ── BOUCLE PRINCIPALE ────────────────────────────────────────
+
+setup_palette()
+math.randomseed(os.time())
+
+while true do
+    if SESSION.logged_in then
+        local ok, bal = bank.balance(SESSION.name)
+        if ok then SESSION.balance = bal end
+    end
+
+    draw_main_ui()
+    
+    local event, button, x, y = os.pullEvent()
+    
+    if event == "mouse_click" then
+        -- Quitter
+        if x >= W-11 and y == 18 then
+            break
+        end
+
+        -- Deconnexion
+        if SESSION.logged_in and x >= 2 and x <= 16 and y == 18 then
+            SESSION.logged_in = false
+            SESSION.name = ""
+            SESSION.balance = 0
+        end
+
+        -- Connexion
+        if not SESSION.logged_in and y >= 13 and y <= 15 then
+            if not login_screen() then
+                draw_main_ui("Echec connexion", colors.red)
+                os.sleep(1)
+            end
+        end
+
+        -- Jouer (Zones cliquables)
+        if SESSION.logged_in and y == 13 then
+            if x <= math.floor(W/3) then
+                play_round("R")
+            elseif x <= math.floor(W/3)*2 then
+                play_round("N")
+            else
+                play_round("V")
+            end
+        end
+    end
+end
+
+-- Reset terminal
 term.setBackgroundColor(colors.black)
+term.setTextColor(colors.white)
 term.clear()
 term.setCursorPos(1,1)
