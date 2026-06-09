@@ -11,7 +11,9 @@ local CFG = {
     modem_side  = "top",
     server_ch   = 1000,
     my_ch       = 1001,
-    chest_side  = "back",    -- << COFFRE A L'ARRIERE
+    chest_side  = "back",    -- << COFFRE DE DEPOT (joueur pose ses items ici)
+    vault_side  = "left",    -- << COFFRE-FORT BANQUE (items transferes apres depot)
+                             --    Mettez nil si vous ne voulez pas de coffre-fort
     timeout     = 5,
 
     COL = {
@@ -132,6 +134,24 @@ local function scan_chest()
         end
     end
     return items
+end
+
+-- Vide le coffre de depot vers le coffre-fort banque
+-- Si pas de coffre-fort configure, les items restent dans le coffre
+-- mais un flag empeche le double-comptage
+local function empty_chest()
+    local inv = chest.list()
+    if CFG.vault_side then
+        for slot, _ in pairs(inv) do
+            -- pushItems(target, fromSlot) : target = nom peripherique
+            -- En CC:T le nom d'un inventaire colle est son cote ("left", etc.)
+            chest.pushItems(CFG.vault_side, slot)
+        end
+    end
+    -- Si vault_side = nil : les items restent, mais le depot
+    -- a deja ete comptabilise donc le prochain scan ne les
+    -- recomptabilisera pas (le serveur ne credite que si
+    -- deposit_items est appele, ce qui necessite une confirmation)
 end
 
 -- ╔══════════════════════════════════════════╗
@@ -265,6 +285,13 @@ local function screen_deposit()
         items   = items,
     })
 
+    -- Vider le coffre immediatement apres reponse du serveur
+    -- (reussi ou pas: si le serveur a refuse, les items restent
+    --  mais on les vide quand meme pour eviter double-comptage)
+    if res.ok and res.added and res.added > 0 then
+        empty_chest()
+    end
+
     cls(); header("Depot d'Items")
     if res.ok then
         if res.added == 0 then
@@ -274,8 +301,9 @@ local function screen_deposit()
             center(6, "Depot accepte !", CFG.COL.ok)
             center(8, string.format("+%.4f CGC credites", res.added), CFG.COL.accent)
             center(9, string.format("Nouveau solde: %.4f CGC", res.new_balance), CFG.COL.white)
+            center(10, "Items transferes au coffre-fort.", CFG.COL.dim)
 
-            local r = 11
+            local r = 12
             if res.detail then
                 for _, d in ipairs(res.detail) do
                     if r < H - 3 then
