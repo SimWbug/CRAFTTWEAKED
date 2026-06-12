@@ -231,7 +231,7 @@ local function draw_symbol(x, y, sym, highlight)
     -- Ligne 1: bordure haut
     local border_fg = highlight and "3" or "9"
     local border_bg = highlight and "3" or sym.bg
-    blit_at(x, y,   "+---------+":sub(1, REEL_W),
+    blit_at(x, y,   string.sub("+---------+", 1, REEL_W),
             string.rep(border_fg, REEL_W),
             string.rep(border_bg, REEL_W))
     -- Ligne 2: symbole avec label centre
@@ -244,7 +244,7 @@ local function draw_symbol(x, y, sym, highlight)
             l2_fg:sub(1, REEL_W),
             l2_bg:sub(1, REEL_W))
     -- Ligne 3: bordure bas
-    blit_at(x, y+2, "+---------+":sub(1, REEL_W),
+    blit_at(x, y+2, string.sub("+---------+", 1, REEL_W),
             string.rep(border_fg, REEL_W),
             string.rep(border_bg, REEL_W))
 end
