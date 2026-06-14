@@ -1,6 +1,6 @@
 -- ============================================================
---  CGCasino - Publicité Billboard PRO (Monitor 4x4)
---  Graphismes NFP & Animations Dynamiques
+--  CGCasino - Affiche Publicitaire NFP (Monitor 4x4)
+--  Titre : MACHINE À SOUS | Fond : Symboles éparpillés
 -- ============================================================
 
 local monitor_side = "front"
@@ -11,33 +11,44 @@ mon.setTextScale(0.5)
 local mw, mh = mon.getSize()
 
 -- ============================================================
--- GÉNÉRATEUR D'IMAGES NFP (Pixel-Art)
+-- GÉNÉRATION DES COMPOSANTS GRAPHIQUES
 -- ============================================================
-if not fs.exists("/pub") then fs.makeDir("/pub") end
+if not fs.exists("/art") then fs.makeDir("/art") end
 
-local function createImg(path, data)
-    local f = fs.open(path, "w")
-    f.write(data)
-    f.close()
+local function create(path, data)
+    local f = fs.open(path, "w") f.write(data) f.close()
 end
 
--- Image: Logo CGC (Couronne dorée)
-createImg("/pub/logo.nfp", "00044400\n04444440\n44044044\n44444444\n04444440")
+-- Petit 7 pour le fond
+create("/art/back_7.nfp", "0eeeee\ne4444e\neee44e\nee44ee\ne44eee\neeeee")
+-- Petit Diamant pour le fond
+create("/art/back_dia.nfp", "003300\n03b330\n3bbb33\n03b330\n003300")
+-- Petite Cerise pour le fond
+create("/art/back_ceri.nfp", "00550\n00500\n02020\n22222\n02020")
 
--- Image: Gros 7 Rouge
-createImg("/pub/big7.nfp", "eeeeeee\ne44444e\neeee44e\neee44ee\nee44eee\ne44eeee\nee44eee\neeeeeee")
-
--- Image: Diamant
-createImg("/pub/dia.nfp", "0033300\n033b330\n33bbb33\n033b330\n0033300")
-
--- Image: Cerise
-createImg("/pub/ceri.nfp", "0005500\n0005000\n0220220\n2222222\n0220220")
+-- LE TITRE GÉANT "MACHINE À SOUS" (Format NFP)
+-- Chaque ligne représente une ligne de pixels/caractères
+create("/art/titre.nfp", 
+"777777777777777777777777777777777777777777777777\n"..
+"700000000000000000000000000000000000000000000007\n"..
+"70  M   M  AAA  CCCC H  H I N  N EEE    AAA    07\n"..
+"70  MM MM A   A C    H  H I NN N E      A   A   07\n"..
+"70  M M M AAAAA C    HHHH I N NN EEE    AAAAA   07\n"..
+"70  M   M A   A CCCC H  H I N  N EEE    A   A   07\n"..
+"70                                              07\n"..
+"70      SSSS  OOO  U   U  SSSS                  07\n"..
+"70     S     O   O U   U S                      07\n"..
+"70      SSS  O   O U   U  SSS                   07\n"..
+"70         S O   O U   U     S                  07\n"..
+"70     SSSS   OOO   UUU  SSSS                   07\n"..
+"700000000000000000000000000000000000000000000007\n"..
+"777777777777777777777777777777777777777777777777")
 
 -- ============================================================
 -- FONCTIONS DE DESSIN
 -- ============================================================
 
-local function drawImg(path, x, y)
+local function drawNFP(path, x, y)
     if fs.exists(path) then
         local img = paintutils.loadImage(path)
         local old = term.redirect(mon)
@@ -46,104 +57,49 @@ local function drawImg(path, x, y)
     end
 end
 
-local function rect(x, y, w, h, color)
-    mon.setBackgroundColor(color)
-    for i=0, h-1 do
-        mon.setCursorPos(x, y+i)
-        mon.write(string.rep(" ", w))
-    end
-end
-
-local function center(y, text, fg, bg)
-    mon.setTextColor(fg)
-    mon.setBackgroundColor(bg or colors.black)
-    mon.setCursorPos(math.floor((mw - #text)/2)+1, y)
-    mon.write(text)
-end
-
--- ============================================================
--- SÉQUENCES D'ANIMATION
--- ============================================================
-
--- 1. Présentation du Casino
-local function intro()
-    for i=1, 20 do
-        mon.setBackgroundColor(colors.black)
-        mon.clear()
-        
-        -- Bordure clignotante
-        local bc = (i%2==0) and colors.yellow or colors.orange
-        rect(1, 1, mw, 1, bc)
-        rect(1, mh, mw, 1, bc)
-        
-        drawImg("/pub/logo.nfp", mw/2-4, mh/2-5)
-        center(mh/2 + 2, "CGCASINO", colors.white, colors.black)
-        center(mh/2 + 4, "L'EXCELLENCE DU JEU", colors.lightGray, colors.black)
-        
-        os.sleep(0.2)
-    end
-end
-
--- 2. Simulation de Jackpot (Effet visuel NFP)
-local function jackpotShow()
-    local icons = {"/pub/big7.nfp", "/pub/dia.nfp", "/pub/ceri.nfp"}
-    
-    -- Simulation de rouleaux
-    for spin=1, 15 do
-        mon.setBackgroundColor(colors.gray)
-        mon.clear()
-        rect(2, 4, mw-2, 12, colors.white) -- Fond des rouleaux
-        
-        for r=1, 3 do
-            local x = 6 + (r-1)*18
-            drawImg(icons[math.random(#icons)], x, 6)
-        end
-        os.sleep(0.1)
-    end
-    
-    -- Arrêt sur 3 sept (JACKPOT)
-    mon.setBackgroundColor(colors.red)
-    mon.clear()
-    for r=1, 3 do
-        local x = 6 + (r-1)*18
-        drawImg("/pub/big7.nfp", x, 6)
-        os.sleep(0.5)
-    end
-    
-    -- Flash final
-    for i=1, 10 do
-        local bg = (i%2==0) and colors.yellow or colors.red
-        mon.setBackgroundColor(bg)
-        mon.setCursorPos(1,1)
-        mon.clear()
-        center(mh/2, " !!! JACKPOT !!! ", colors.black, bg)
-        center(mh/2 + 2, "GAGNEZ JUSQU'A 1M", colors.black, bg)
-        os.sleep(0.1)
-    end
-end
-
--- 3. Message "Où jouer ?"
-local function locationInfo()
+local function drawPoster()
+    -- 1. Fond noir uni
     mon.setBackgroundColor(colors.black)
     mon.clear()
-    
-    rect(5, mh/2-3, mw-8, 7, colors.blue)
-    center(mh/2-1, "RETROUVEZ-NOUS AU", colors.white, colors.blue)
-    center(mh/2+1, "CENTRE-VILLE", colors.yellow, colors.blue)
-    
-    -- Défilement de petites icônes en bas
-    for x=1, mw, 8 do
-        drawImg("/pub/dia.nfp", x, mh-4)
-        os.sleep(0.2)
-    end
+
+    -- 2. Dessiner les symboles en arrière-plan (éparpillés)
+    -- On les dessine avec des coordonnées fixes pour faire "affiche"
+    drawNFP("/art/back_7.nfp", 5, 4)
+    drawNFP("/art/back_dia.nfp", 55, 6)
+    drawNFP("/art/back_ceri.nfp", 12, 25)
+    drawNFP("/art/back_7.nfp", 60, 28)
+    drawNFP("/art/back_dia.nfp", 35, 30)
+    drawNFP("/art/back_ceri.nfp", 45, 3)
+
+    -- 3. Ajouter un effet de "filtre" sombre sur les symboles (optionnel)
+    -- Ici on laisse tel quel pour que ce soit flashy.
+
+    -- 4. Dessiner le TITRE par-dessus (Centré)
+    -- Le titre est entouré d'une bordure définie dans le NFP
+    drawNFP("/art/titre.nfp", mw/2 - 24, mh/2 - 7)
+
+    -- 5. Ajouter un petit texte brillant en bas
+    mon.setTextColor(colors.yellow)
+    mon.setBackgroundColor(colors.black)
+    local txt = "=== JOUEZ AU CENTRE DU CASINO ==="
+    mon.setCursorPos(mw/2 - #txt/2 + 1, mh - 3)
+    mon.write(txt)
 end
 
 -- ============================================================
--- BOUCLE PRINCIPALE
+-- ANIMATION DE L'AFFICHE (Petit scintillement pour attirer l'oeil)
 -- ============================================================
 
 while true do
-    intro()
-    jackpotShow()
-    locationInfo()
+    -- Affichage de base
+    drawPoster()
+    
+    -- Effet de scintillement sur le titre (on change la couleur de la bordure du titre)
+    for i=1, 5 do
+        -- On redessine juste le texte avec une petite variation
+        mon.setCursorPos(mw/2 - 10, mh - 3)
+        mon.setTextColor(i%2 == 0 and colors.orange or colors.yellow)
+        mon.write("=== JOUEZ AU CENTRE DU CASINO ===")
+        os.sleep(0.5)
+    end
 end
