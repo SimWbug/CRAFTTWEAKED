@@ -1,0 +1,258 @@
+-- ============================================================
+--  CGCasino - Slot Machine v3.0 DELUXE (Monitor Edition)
+--  Support: Moniteur 2x3, Images .nfp, Tactile
+-- ============================================================
+
+local monitor_side = "front"
+local server_ch    = 1000
+local my_ch        = 1011
+local modem_side   = "top" -- à adapter
+
+-- Configuration du jeu
+local CFG = {
+    bet_presets = {0.5, 1, 2, 5, 10, 20, 50},
+    speaker_side = "left", -- ou nil
+}
+
+-- Connexion périphériques
+local mon = peripheral.wrap(monitor_side)
+if not mon then error("Moniteur introuvable sur le cote: "..monitor_side) end
+mon.setTextScale(0.5) -- Augmente la resolution pour les images
+local mw, mh = mon.getSize()
+
+-- Charger l'API Banque
+if not fs.exists("cgbank_api") then
+    error("API cgbank_api manquante !")
+end
+os.loadAPI("cgbank_api")
+local bank = cgbank_api.new(modem_side, server_ch, my_ch)
+
+-- ============================================================
+-- GENERATEUR D'IMAGES (Si inexistantes)
+-- ============================================================
+local function generateImage(path, content)
+    if not fs.exists(path) then
+        local f = fs.open(path, "w")
+        f.write(content)
+        f.close()
+    end
+end
+
+-- Création de dossiers pour les images
+if not fs.exists("/img") then fs.makeDir("/img") end
+
+-- Note: Les codes couleurs sont en hexadecimal (1-f)
+generateImage("/img/sym_7.nfp", "eeeeeee\ne44444e\neeee44e\neee44ee\nee44eee\ne44eeee\neeeeeee")
+generateImage("/img/sym_dia.nfp", "0033300\n033b330\n33bbb33\n033b330\n0033300")
+generateImage("/img/sym_bell.nfp", "0044400\n0444440\n0444440\n0444440\n0011100")
+generateImage("/img/sym_bar.nfp", "7777777\n7000007\n70BAR07\n7000007\n7777777")
+generateImage("/img/sym_ceri.nfp", "0005500\n0005000\n0220220\n2222222\n0220220")
+generateImage("/img/sym_lemon.nfp", "00dd000\nddddddd\nddddddd\nddddddd\n00dd000")
+
+-- ============================================================
+-- VARIABLES DE JEU
+-- ============================================================
+local SYMBOLS = {
+    {id="7",     path="/img/sym_7.nfp",    mult=50, poids=2},
+    {id="dia",   path="/img/sym_dia.nfp",  mult=20, poids=4},
+    {id="bell",  path="/img/sym_bell.nfp", mult=10, poids=6},
+    {id="bar",   path="/img/sym_bar.nfp",  mult=5,  poids=8},
+    {id="ceri",  path="/img/sym_ceri.nfp", mult=3,  poids=12},
+    {id="lemon", path="/img/sym_lemon.nfp",mult=2,  poids=15},
+}
+
+local REEL_DATA = {}
+for _, s in ipairs(SYMBOLS) do
+    for i=1, s.poids do table.insert(REEL_DATA, s) end
+end
+
+local reel_pos = {1, 5, 10}
+local session = {logged_in = false, name = "", balance = 0}
+local current_bet_idx = 2
+local last_win = 0
+local is_spinning = false
+
+-- ============================================================
+-- FONCTIONS GRAPHIQUES
+-- ============================================================
+local function drawImg(path, x, y)
+    if fs.exists(path) then
+        local img = paintutils.loadImage(path)
+        local old_term = term.redirect(mon)
+        paintutils.drawImage(img, x, y)
+        term.redirect(old_term)
+    end
+end
+
+local function drawRect(x, y, w, h, color)
+    mon.setBackgroundColor(color)
+    for i=0, h-1 do
+        mon.setCursorPos(x, y+i)
+        mon.write(string.rep(" ", w))
+    end
+end
+
+local function centerText(y, text, fg, bg)
+    mon.setTextColor(fg)
+    mon.setBackgroundColor(bg)
+    mon.setCursorPos(math.floor((mw - #text)/2)+1, y)
+    mon.write(text)
+end
+
+-- ============================================================
+-- DESSIN DE L'INTERFACE
+-- ============================================================
+local function drawUI()
+    mon.setBackgroundColor(colors.gray)
+    mon.clear()
+    
+    -- Header
+    drawRect(1, 1, mw, 5, colors.black)
+    centerText(2, "CG CASINO", colors.yellow, colors.black)
+    centerText(3, "SLOT MACHINE", colors.orange, colors.black)
+    
+    -- Zone des rouleaux (Fond)
+    drawRect(3, 7, mw-4, 11, colors.lightGray)
+    
+    -- Dessin des 3 rouleaux (Positions fixes pour monitor 2x3)
+    for i=1, 3 do
+        local sym = REEL_DATA[reel_pos[i]]
+        local x = 5 + (i-1) * 10
+        drawImg(sym.path, x, 9)
+    end
+
+    -- Flèches de gain
+    mon.setTextColor(colors.red)
+    mon.setCursorPos(2, 11); mon.write(">")
+    mon.setCursorPos(mw-1, 11); mon.write("<")
+
+    -- Zone Infos (Balance / Mise)
+    drawRect(1, 19, mw, 8, colors.black)
+    if session.logged_in then
+        centerText(20, "Compte: "..session.name, colors.cyan, colors.black)
+        centerText(21, string.format("Solde: %.2f CGC", session.balance), colors.lime, colors.black)
+    else
+        centerText(20, "Veuillez vous connecter", colors.lightGray, colors.black)
+        centerText(21, "sur l'ordinateur", colors.lightGray, colors.black)
+    end
+
+    -- Boutons
+    centerText(23, " MISE: "..CFG.bet_presets[current_bet_idx].." ", colors.white, colors.blue)
+    
+    -- Bouton SPIN (Gros bouton en bas)
+    drawRect(5, 25, mw-8, 3, is_spinning and colors.gray or colors.red)
+    centerText(26, " !!! SPIN !!! ", colors.white, is_spinning and colors.gray or colors.red)
+end
+
+-- ============================================================
+-- LOGIQUE DE JEU
+-- ============================================================
+local function spin()
+    if is_spinning or not session.logged_in then return end
+    local bet = CFG.bet_presets[current_bet_idx]
+    
+    if session.balance < bet then return end
+    
+    is_spinning = true
+    
+    -- Retrait banquaire
+    local ok, msg, new_bal = bank.withdraw(session.name, bet, "Slot Machine")
+    if not ok then is_spinning = false; return end
+    session.balance = new_bal
+    
+    -- Animation de spin
+    for frames = 1, 20 do
+        for r=1, 3 do
+            reel_pos[r] = math.random(1, #REEL_DATA)
+        end
+        drawUI()
+        os.sleep(0.05)
+    end
+    
+    -- Calcul résultat
+    local s1 = REEL_DATA[reel_pos[1]]
+    local s2 = REEL_DATA[reel_pos[2]]
+    local s3 = REEL_DATA[reel_pos[3]]
+    
+    if s1.id == s2.id and s2.id == s3.id then
+        local gain = bet * s1.mult
+        bank.deposit(session.name, gain, "Jackpot Slot!")
+        last_win = gain
+        -- Flash victoire
+        for i=1,4 do
+            drawRect(1,1,mw,mh, colors.yellow); os.sleep(0.1)
+            drawUI(); os.sleep(0.1)
+        end
+    else
+        last_win = 0
+    end
+    
+    local ok2, bal = bank.balance(session.name)
+    if ok2 then session.balance = bal end
+    
+    is_spinning = false
+    drawUI()
+end
+
+-- ============================================================
+-- BOUCLE PRINCIPALE (Events)
+-- ============================================================
+drawUI()
+
+-- On gère la connexion sur l'écran du PC (Terminal)
+local function terminalLogin()
+    while true do
+        term.clear()
+        print("--- Connexion CGBank ---")
+        write("Utilisateur: ")
+        local name = read()
+        write("Password: ")
+        local pass = read("*")
+        
+        local res = bank.login(name, pass)
+        if res.ok then
+            session.logged_in = true
+            session.name = name
+            session.balance = res.balance
+            drawUI()
+            print("Connecte !")
+            return
+        else
+            print("Erreur: "..tostring(res.msg))
+            os.sleep(2)
+        end
+    end
+end
+
+-- Lancer la connexion dans un thread séparé
+parallel.waitForAny(
+    terminalLogin,
+    function()
+        while true do
+            local event, side, x, y = os.pullEvent()
+            
+            -- Détection clic sur moniteur
+            if event == "monitor_touch" then
+                -- Clic sur zone Mise
+                if y == 23 then
+                    current_bet_idx = current_bet_idx + 1
+                    if current_bet_idx > #CFG.bet_presets then current_bet_idx = 1 end
+                    drawUI()
+                end
+                
+                -- Clic sur bouton SPIN
+                if y >= 25 and y <= 27 and x >= 5 and x <= mw-4 then
+                    spin()
+                end
+            end
+            
+            -- Update balance périodique
+            if event == "timer" then
+                if session.logged_in then
+                    local ok, bal = bank.balance(session.name)
+                    if ok then session.balance = bal; drawUI() end
+                end
+            end
+        end
+    end
+)
