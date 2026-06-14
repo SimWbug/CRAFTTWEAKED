@@ -1,64 +1,55 @@
 -- ============================================================
---  CGCasino - Slot Machine v3.0 DELUXE (Monitor Edition)
---  Support: Moniteur 2x3, Images .nfp, Tactile
+--  CGCasino - Slot Machine v3.2 (Monitor + Music Loop)
 -- ============================================================
 
 local monitor_side = "front"
+local modem_side   = "top"   
+local speaker_side = "left"  -- Assure-toi que le speaker est à gauche
 local server_ch    = 1000
 local my_ch        = 1011
-local modem_side   = "top" -- à adapter
 
--- Configuration du jeu
+-- Configuration
 local CFG = {
-    bet_presets = {0.5, 1, 2, 5, 10, 20, 50},
-    speaker_side = "left", -- ou nil
+    bet_presets = {0.5, 1, 2, 5, 10, 25, 50},
 }
 
 -- Connexion périphériques
 local mon = peripheral.wrap(monitor_side)
-if not mon then error("Moniteur introuvable sur le cote: "..monitor_side) end
-mon.setTextScale(0.5) -- Augmente la resolution pour les images
+local modem = peripheral.wrap(modem_side)
+local speaker = peripheral.wrap(speaker_side)
+
+if not mon then error("Moniteur introuvable en: " .. monitor_side) end
+if not modem then error("Modem introuvable en: " .. modem_side) end
+
+mon.setTextScale(0.5)
 local mw, mh = mon.getSize()
 
 -- Charger l'API Banque
-if not fs.exists("cgbank_api") then
-    error("API cgbank_api manquante !")
-end
+if not fs.exists("cgbank_api") then error("API cgbank_api manquante !") end
 os.loadAPI("cgbank_api")
 local bank = cgbank_api.new(modem_side, server_ch, my_ch)
 
--- ============================================================
--- GENERATEUR D'IMAGES (Si inexistantes)
--- ============================================================
-local function generateImage(path, content)
+-- [Génération des images NFP - Gardée de la version précédente]
+if not fs.exists("/img") then fs.makeDir("/img") end
+local function gen(path, data)
     if not fs.exists(path) then
-        local f = fs.open(path, "w")
-        f.write(content)
-        f.close()
+        local f = fs.open(path, "w") f.write(data) f.close()
     end
 end
+gen("/img/s7.nfp", "00eeee00\n0eeeeee0\nee4444ee\ne44ee44e\neeeee44e\neeee44ee\neee44eee\nee44eeee")
+gen("/img/sd.nfp", "000bb000\n00bbbb00\n0bbbbbb0\nbbb99bbb\n0bbbbbb0\n00bbbb00\n000bb000")
+gen("/img/sb.nfp", "00077000\n00777700\n07777770\n07777770\n00444400\n00044000")
+gen("/img/sr.nfp", "77777777\n70000007\n70BAR007\n70000007\n77777777")
+gen("/img/sc.nfp", "00055000\n00050000\n02202200\n22222220\n02202200")
+gen("/img/sl.nfp", "00dddd00\n0dddddd0\ndddddddd\ndddddddd\n0dddddd0\n00dddd00")
 
--- Création de dossiers pour les images
-if not fs.exists("/img") then fs.makeDir("/img") end
-
--- Note: Les codes couleurs sont en hexadecimal (1-f)
-generateImage("/img/sym_7.nfp", "eeeeeee\ne44444e\neeee44e\neee44ee\nee44eee\ne44eeee\neeeeeee")
-generateImage("/img/sym_dia.nfp", "0033300\n033b330\n33bbb33\n033b330\n0033300")
-generateImage("/img/sym_bell.nfp", "0044400\n0444440\n0444440\n0444440\n0011100")
-generateImage("/img/sym_bar.nfp", "7777777\n7000007\n70BAR07\n7000007\n7777777")
-generateImage("/img/sym_ceri.nfp", "0005500\n0005000\n0220220\n2222222\n0220220")
-generateImage("/img/sym_lemon.nfp", "00dd000\nddddddd\nddddddd\nddddddd\n00dd000")
-
--- ============================================================
--- VARIABLES DE JEU
--- ============================================================
 local SYMBOLS = {
-    {id="7",     path="/img/sym_7.nfp",    mult=50, poids=2},
-    {id="dia",   path="/img/sym_dia.nfp",  mult=20, poids=4},
-    {id="bell",  path="/img/sym_bell.nfp", mult=10, poids=6},
-    {id="bar",   path="/img/sym_bar.nfp",  mult=5,  poids=8},
-    {id="ceri",  path="/img/sym_ceri.nfp", mult=3,  poids=12},
-    {id="lemon", path="/img/sym_lemon.nfp",mult=2,  poids=15},
+    {id="7", path="/img/s7.nfp", mult=50, poids=2},
+    {id="dia", path="/img/sd.nfp", mult=20, poids=4},
+    {id="bell", path="/img/sb.nfp", mult=10, poids=6},
+    {id="bar", path="/img/sr.nfp", mult=5, poids=8},
+    {id="ceri", path="/img/sc.nfp", mult=3, poids=12},
+    {id="lemon", path="/img/sl.nfp", mult=2, poids=15},
 }
 
 local REEL_DATA = {}
@@ -68,191 +59,177 @@ end
 
 local reel_pos = {1, 5, 10}
 local session = {logged_in = false, name = "", balance = 0}
-local current_bet_idx = 2
-local last_win = 0
+local cur_bet_idx = 2
 local is_spinning = false
 
 -- ============================================================
--- FONCTIONS GRAPHIQUES
+-- FONCTIONS SONORES (Musique et Bruitages)
 -- ============================================================
+local function playNote(inst, pitch, vol)
+    if speaker then pcall(function() speaker.playNote(inst, vol or 1, pitch) end) end
+end
+
+-- Petite musique d'ambiance en boucle
+local function playMusicLoop()
+    local melody = {12, 16, 19, 16, 14, 18, 21, 18} -- Do Mi Sol Mi Re Fa# La Fa#
+    local i = 1
+    while true do
+        -- On ne joue la musique que si quelqu'un est connecté
+        if session.logged_in and not is_spinning then
+            playNote("pling", melody[i], 0.3) -- pling = son doux
+            i = i + 1
+            if i > #melody then i = 1 end
+            os.sleep(0.6) -- Rythme de la musique
+        else
+            os.sleep(1) -- Pause si personne ne joue
+        end
+    end
+end
+
+-- ============================================================
+-- LOGIQUE RESEAU ET DESSIN
+-- ============================================================
+local function bank_send(t)
+    t.reply_ch = my_ch
+    modem.transmit(server_ch, my_ch, t)
+    local timer = os.startTimer(3)
+    while true do
+        local e, _, ch, _, m = os.pullEvent()
+        if e == "modem_message" and ch == my_ch and type(m) == "table" then return m
+        elseif e == "timer" then return {ok=false, msg="Timeout"} end
+    end
+end
+
 local function drawImg(path, x, y)
     if fs.exists(path) then
         local img = paintutils.loadImage(path)
-        local old_term = term.redirect(mon)
+        local old = term.redirect(mon)
         paintutils.drawImage(img, x, y)
-        term.redirect(old_term)
+        term.redirect(old)
     end
 end
 
-local function drawRect(x, y, w, h, color)
-    mon.setBackgroundColor(color)
-    for i=0, h-1 do
-        mon.setCursorPos(x, y+i)
-        mon.write(string.rep(" ", w))
-    end
-end
-
-local function centerText(y, text, fg, bg)
-    mon.setTextColor(fg)
-    mon.setBackgroundColor(bg)
-    mon.setCursorPos(math.floor((mw - #text)/2)+1, y)
-    mon.write(text)
-end
-
--- ============================================================
--- DESSIN DE L'INTERFACE
--- ============================================================
-local function drawUI()
+local function drawUI(msg, msg_col)
     mon.setBackgroundColor(colors.gray)
     mon.clear()
-    
-    -- Header
-    drawRect(1, 1, mw, 5, colors.black)
-    centerText(2, "CG CASINO", colors.yellow, colors.black)
-    centerText(3, "SLOT MACHINE", colors.orange, colors.black)
-    
-    -- Zone des rouleaux (Fond)
-    drawRect(3, 7, mw-4, 11, colors.lightGray)
-    
-    -- Dessin des 3 rouleaux (Positions fixes pour monitor 2x3)
+    mon.setBackgroundColor(colors.black)
+    for i=1, 5 do mon.setCursorPos(1, i); mon.write(string.rep(" ", mw)) end
+    mon.setTextColor(colors.yellow); mon.setCursorPos(mw/2-4, 2); mon.write("CGCASINO")
+    mon.setTextColor(colors.orange); mon.setCursorPos(mw/2-6, 3); mon.write("SLOT MACHINE")
+
     for i=1, 3 do
-        local sym = REEL_DATA[reel_pos[i]]
-        local x = 5 + (i-1) * 10
-        drawImg(sym.path, x, 9)
+        local x = 4 + (i-1) * 11
+        mon.setBackgroundColor(colors.lightGray)
+        for dy=0, 9 do mon.setCursorPos(x-1, 8+dy); mon.write("          ") end
+        drawImg(REEL_DATA[reel_pos[i]].path, x, 9)
     end
 
-    -- Flèches de gain
-    mon.setTextColor(colors.red)
-    mon.setCursorPos(2, 11); mon.write(">")
-    mon.setCursorPos(mw-1, 11); mon.write("<")
-
-    -- Zone Infos (Balance / Mise)
-    drawRect(1, 19, mw, 8, colors.black)
-    if session.logged_in then
-        centerText(20, "Compte: "..session.name, colors.cyan, colors.black)
-        centerText(21, string.format("Solde: %.2f CGC", session.balance), colors.lime, colors.black)
-    else
-        centerText(20, "Veuillez vous connecter", colors.lightGray, colors.black)
-        centerText(21, "sur l'ordinateur", colors.lightGray, colors.black)
+    if msg then
+        mon.setTextColor(msg_col or colors.white)
+        mon.setBackgroundColor(colors.gray)
+        mon.setCursorPos(mw/2-(#msg/2)+1, 19); mon.write(msg)
     end
 
-    -- Boutons
-    centerText(23, " MISE: "..CFG.bet_presets[current_bet_idx].." ", colors.white, colors.blue)
+    mon.setBackgroundColor(colors.black)
+    for i=21, 28 do mon.setCursorPos(1, i); mon.write(string.rep(" ", mw)) end
     
-    -- Bouton SPIN (Gros bouton en bas)
-    drawRect(5, 25, mw-8, 3, is_spinning and colors.gray or colors.red)
-    centerText(26, " !!! SPIN !!! ", colors.white, is_spinning and colors.gray or colors.red)
+    if session.logged_in then
+        mon.setTextColor(colors.cyan); mon.setCursorPos(2, 22); mon.write("User: "..session.name)
+        mon.setTextColor(colors.lime); mon.setCursorPos(2, 23); mon.write(string.format("Solde: %.2f CGC", session.balance))
+    else
+        mon.setTextColor(colors.lightGray); mon.setCursorPos(mw/2-8, 22); mon.write("Connectez-vous sur PC")
+    end
+
+    mon.setBackgroundColor(colors.blue); mon.setTextColor(colors.white)
+    mon.setCursorPos(mw/2-6, 25); mon.write(" MISE: "..CFG.bet_presets[cur_bet_idx].." ")
+    
+    mon.setBackgroundColor(is_spinning and colors.gray or colors.red)
+    mon.setCursorPos(mw/2-7, 27); mon.write("  [ SPIN !! ]  ")
 end
 
 -- ============================================================
--- LOGIQUE DE JEU
+-- TOUR DE JEU
 -- ============================================================
-local function spin()
+local function do_spin()
     if is_spinning or not session.logged_in then return end
-    local bet = CFG.bet_presets[current_bet_idx]
-    
-    if session.balance < bet then return end
+    local bet = CFG.bet_presets[cur_bet_idx]
+    if session.balance < bet then playNote("iron_xylophone", 5, 0.5); return end
     
     is_spinning = true
-    
-    -- Retrait banquaire
-    local ok, msg, new_bal = bank.withdraw(session.name, bet, "Slot Machine")
+    local ok, _, new_bal = bank.withdraw(session.name, bet, "Slot Spin")
     if not ok then is_spinning = false; return end
     session.balance = new_bal
     
-    -- Animation de spin
-    for frames = 1, 20 do
-        for r=1, 3 do
-            reel_pos[r] = math.random(1, #REEL_DATA)
-        end
-        drawUI()
-        os.sleep(0.05)
+    playNote("hat", 15, 0.8) -- Son de pièce insérée
+
+    for i=1, 15 do
+        reel_pos[1] = math.random(#REEL_DATA)
+        reel_pos[2] = math.random(#REEL_DATA)
+        reel_pos[3] = math.random(#REEL_DATA)
+        playNote("hat", 10, 0.2) -- Petit clic pendant que ça tourne
+        drawUI("Bonne chance !", colors.yellow)
+        os.sleep(0.1)
     end
     
-    -- Calcul résultat
-    local s1 = REEL_DATA[reel_pos[1]]
-    local s2 = REEL_DATA[reel_pos[2]]
-    local s3 = REEL_DATA[reel_pos[3]]
+    local s1, s2, s3 = REEL_DATA[reel_pos[1]], REEL_DATA[reel_pos[2]], REEL_DATA[reel_pos[3]]
     
     if s1.id == s2.id and s2.id == s3.id then
         local gain = bet * s1.mult
-        bank.deposit(session.name, gain, "Jackpot Slot!")
-        last_win = gain
-        -- Flash victoire
-        for i=1,4 do
-            drawRect(1,1,mw,mh, colors.yellow); os.sleep(0.1)
-            drawUI(); os.sleep(0.1)
-        end
+        bank.deposit(session.name, gain, "Gagné Slot!")
+        session.balance = session.balance + gain
+        drawUI("JACKPOT: +"..gain, colors.lime)
+        -- Petite fanfare de victoire
+        playNote("chime", 12, 1) os.sleep(0.1)
+        playNote("chime", 15, 1) os.sleep(0.1)
+        playNote("chime", 19, 1)
+        os.sleep(2)
     else
-        last_win = 0
+        playNote("basedrum", 5, 0.8) -- Son d'échec
+        drawUI("Perdu...", colors.red)
     end
-    
-    local ok2, bal = bank.balance(session.name)
-    if ok2 then session.balance = bal end
     
     is_spinning = false
     drawUI()
 end
 
 -- ============================================================
--- BOUCLE PRINCIPALE (Events)
+-- LANCEMENT (THREADS PARALLELES)
 -- ============================================================
 drawUI()
 
--- On gère la connexion sur l'écran du PC (Terminal)
-local function terminalLogin()
-    while true do
-        term.clear()
-        print("--- Connexion CGBank ---")
-        write("Utilisateur: ")
-        local name = read()
-        write("Password: ")
-        local pass = read("*")
-        
-        local res = bank.login(name, pass)
-        if res.ok then
-            session.logged_in = true
-            session.name = name
-            session.balance = res.balance
-            drawUI()
-            print("Connecte !")
-            return
-        else
-            print("Erreur: "..tostring(res.msg))
-            os.sleep(2)
-        end
-    end
-end
-
--- Lancer la connexion dans un thread séparé
 parallel.waitForAny(
-    terminalLogin,
+    -- Musique en boucle
+    playMusicLoop,
+    
+    -- Thread de Connexion (PC)
     function()
         while true do
-            local event, side, x, y = os.pullEvent()
-            
-            -- Détection clic sur moniteur
-            if event == "monitor_touch" then
-                -- Clic sur zone Mise
-                if y == 23 then
-                    current_bet_idx = current_bet_idx + 1
-                    if current_bet_idx > #CFG.bet_presets then current_bet_idx = 1 end
-                    drawUI()
-                end
-                
-                -- Clic sur bouton SPIN
-                if y >= 25 and y <= 27 and x >= 5 and x <= mw-4 then
-                    spin()
-                end
+            term.clear(); term.setCursorPos(1,1)
+            print("--- CGBANK LOGIN ---")
+            write("Compte : "); local u = read()
+            write("Pass   : "); local p = read("*")
+            local res = bank_send({cmd="login", account=u, password=p})
+            if res.ok then
+                session.logged_in = true; session.name = u; session.balance = res.balance or 0
+                drawUI("Bienvenue "..u, colors.cyan)
+                print("\nConnecte ! Musique active."); return
+            else
+                print("\nErreur: "..tostring(res.msg)); os.sleep(2)
             end
-            
-            -- Update balance périodique
-            if event == "timer" then
-                if session.logged_in then
-                    local ok, bal = bank.balance(session.name)
-                    if ok then session.balance = bal; drawUI() end
-                end
+        end
+    end,
+    
+    -- Thread Tactile (Moniteur)
+    function()
+        while true do
+            local ev, side, x, y = os.pullEvent("monitor_touch")
+            if y == 25 then
+                cur_bet_idx = cur_bet_idx + 1
+                if cur_bet_idx > #CFG.bet_presets then cur_bet_idx = 1 end
+                drawUI()
+                playNote("bit", 20, 0.5) -- Bruit de clic mise
             end
+            if y == 27 then do_spin() end
         end
     end
 )
