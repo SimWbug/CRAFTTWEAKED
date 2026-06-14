@@ -1,0 +1,160 @@
+-- ============================================================
+--  CGCasino - Publicité Slot Machine (Billboard 4x4)
+--  Animation Haute Qualité - Boucle Infinie
+-- ============================================================
+
+local monitor_side = "front"
+local mon = peripheral.wrap(monitor_side)
+
+if not mon then error("Moniteur 4x4 introuvable sur le cote: "..monitor_side) end
+
+mon.setTextScale(0.5) -- Résolution max pour un 4x4
+local mw, mh = mon.getSize()
+
+-- Palette de couleurs publicitaires
+local colors_neon = {colors.yellow, colors.orange, colors.red, colors.pink, colors.purple, colors.blue}
+
+-- ============================================================
+-- FONCTIONS GRAPHIQUES
+-- ============================================================
+
+local function clear(color)
+    mon.setBackgroundColor(color or colors.black)
+    mon.clear()
+end
+
+local function centerText(y, text, fg, bg)
+    mon.setTextColor(fg)
+    mon.setBackgroundColor(bg or colors.black)
+    local x = math.floor((mw - #text) / 2) + 1
+    mon.setCursorPos(x, y)
+    mon.write(text)
+end
+
+local function drawBorder(color)
+    mon.setBackgroundColor(color)
+    -- Haut et Bas
+    for x = 1, mw do
+        mon.setCursorPos(x, 1); mon.write(" ")
+        mon.setCursorPos(x, mh); mon.write(" ")
+    end
+    -- Gauche et Droite
+    for y = 1, mh do
+        mon.setCursorPos(1, y); mon.write(" ")
+        mon.setCursorPos(mw, y); mon.write(" ")
+    end
+end
+
+-- Dessine un gros symbole stylisé
+local function drawBigSymbol(x, y, type)
+    if type == "7" then
+        mon.setTextColor(colors.red)
+        mon.setBackgroundColor(colors.yellow)
+        mon.setCursorPos(x, y);   mon.write("  777  ")
+        mon.setCursorPos(x, y+1); mon.write("   7   ")
+        mon.setCursorPos(x, y+2); mon.write("  7    ")
+    elseif type == "DIA" then
+        mon.setTextColor(colors.white)
+        mon.setBackgroundColor(colors.lightBlue)
+        mon.setCursorPos(x, y);   mon.write("  /\\  ")
+        mon.setCursorPos(x, y+1); mon.write(" <  > ")
+        mon.setCursorPos(x, y+2); mon.write("  \\/  ")
+    end
+end
+
+-- ============================================================
+-- SCÈNES D'ANIMATION
+-- ============================================================
+
+-- SCÈNE 1 : Le Titre Flashy
+local function sceneTitle()
+    for i = 1, 15 do
+        clear(colors.black)
+        drawBorder(colors_neon[(i % #colors_neon) + 1])
+        
+        centerText(mh/2 - 2, " $$$$$$$$$$$ ", colors.yellow)
+        centerText(mh/2 - 1, "  CGCASINO   ", colors.white, colors.red)
+        centerText(mh/2,     "  SLOTS !!!  ", colors.white, colors.red)
+        centerText(mh/2 + 2, " TENTE TA CHANCE ", colors.orange)
+        
+        os.sleep(0.2)
+    end
+end
+
+-- SCÈNE 2 : Le Spin Gagnant
+local function sceneSpin()
+    clear(colors.black)
+    local symbols = {"7", "DIA", "BAR", "X"}
+    
+    -- Animation de rotation rapide
+    for i = 1, 20 do
+        drawBorder(colors.gray)
+        for col = 1, 3 do
+            local sym = symbols[math.random(#symbols)]
+            mon.setBackgroundColor(colors.white)
+            mon.setTextColor(colors.black)
+            mon.setCursorPos(6 + (col-1)*12, mh/2)
+            mon.write(" ["..sym.."] ")
+        end
+        os.sleep(0.05)
+    end
+    
+    -- Arrêt sur le JACKPOT
+    clear(colors.black)
+    drawBorder(colors.yellow)
+    for col = 1, 3 do
+        local x = 6 + (col-1)*12
+        mon.setBackgroundColor(colors.red)
+        mon.setTextColor(colors.yellow)
+        mon.setCursorPos(x, mh/2 - 1); mon.write("       ")
+        mon.setCursorPos(x, mh/2);     mon.write("   7   ")
+        mon.setCursorPos(x, mh/2 + 1); mon.write("       ")
+        os.sleep(0.4) -- Petit suspense entre chaque 7
+    end
+    os.sleep(0.5)
+end
+
+-- SCÈNE 3 : Explosion de Gains (Confettis)
+local function sceneJackpot()
+    for i = 1, 30 do
+        clear(colors.black)
+        -- Particules/Confettis
+        for p = 1, 40 do
+            mon.setCursorPos(math.random(2, mw-1), math.random(2, mh-1))
+            mon.setTextColor(colors_neon[math.random(#colors_neon)])
+            mon.write(string.char(math.random(33, 126)))
+        end
+        
+        -- Gros message central clignotant
+        local color = (i % 2 == 0) and colors.yellow or colors.red
+        centerText(mh/2 - 1, " !!! JACKPOT !!! ", colors.white, color)
+        centerText(mh/2 + 1, " + 1.000.000 CGC ", colors.black, colors.yellow)
+        
+        os.sleep(0.1)
+    end
+end
+
+-- SCÈNE 4 : Appel à l'action
+local function sceneCallToAction()
+    clear(colors.black)
+    drawBorder(colors.orange)
+    for i = 1, 10 do
+        local color = (i % 2 == 0) and colors.yellow or colors.white
+        centerText(mh/2 - 3, "DISPONIBLE ICI", colors.lightGray)
+        centerText(mh/2,     "  JOUEZ MAINTENANT  ", colors.black, color)
+        centerText(mh/2 + 3, "DEVIENS RICHE !", colors.lime)
+        os.sleep(0.4)
+    end
+end
+
+-- ============================================================
+-- BOUCLE INFINIE
+-- ============================================================
+
+clear()
+while true do
+    sceneTitle()
+    sceneSpin()
+    sceneJackpot()
+    sceneCallToAction()
+end
